@@ -50,12 +50,29 @@
             --color-bg-secondary: #0a0a15;
             --color-core-cyan: #00f3ff;
             --color-core-cyan-glow: rgba(0, 243, 255, 0.5);
+            --color-alert-red: #ff113c;
             --color-core-purple: #bc13fe;
             --color-text-bright: #ffffff;
             --color-text-dim: #8899a6;
             --font-hud: 'Orbitron', sans-serif;
             --font-ui: 'Rajdhani', sans-serif;
             --z-ui: 100;
+        }
+
+        body.protocol-red {
+            --color-core-cyan: #ff113c;
+            --color-core-cyan-glow: rgba(255, 17, 60, 0.7);
+            --color-text-dim: #ff8da2;
+        }
+
+        body.protocol-red #main-interface {
+            background: radial-gradient(circle at center, #2a000a 0%, #000 100%);
+        }
+
+        body.protocol-red .terminal-window,
+        body.protocol-red .card-glass {
+            border-color: rgba(255, 17, 60, 0.35);
+            box-shadow: 0 0 20px rgba(255, 17, 60, 0.18);
         }
 
         /* --- 1. Reset & Full Screen Lock --- */
@@ -929,8 +946,6 @@
 </div>
 
 
-<body>
-
     <!-- ==========================================================================
        8.0 - SYSTEM SOUND ASSETS
        ========================================================================== -->
@@ -941,6 +956,7 @@
     <audio id="sfx-auth-fail" preload="auto" src="https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3"></audio>
     <audio id="sfx-voice-active" preload="auto" src="https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"></audio>
     <audio id="sfx-message" preload="auto" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+    <audio id="sfx-alert" preload="auto" src="https://assets.mixkit.co/active_storage/sfx/222/222-preview.mp3"></audio>
 
     <!-- ==========================================================================
        9.0 - ROYAL LOADING SCREEN (JARVIS BOOT SEQUENCE)
@@ -1337,7 +1353,7 @@
         <i class="fas fa-th-large text-xl mb-1"></i><span style="font-size:9px; font-weight:bold; font-family: 'Rajdhani', sans-serif;">APPS</span>
     </button>
     
-    <button class="nav-btn flex-col flex-center text-dim" onclick="window.location.href='neural-chat.html'" style="flex:1; background:none; border:none;">
+    <button class="nav-btn flex-col flex-center text-dim" onclick="openNeuralChatInterface()" style="flex:1; background:none; border:none;">
         <i class="fas fa-brain text-xl mb-1" style="color: #00f3ff;"></i><span style="font-size:9px; font-weight:bold; font-family: 'Rajdhani', sans-serif;">NEURAL</span>
     </button>
     
@@ -1444,8 +1460,10 @@ const userState = {
     runtime: {
         isListening: false,
         currentView: 'home',
-        // --- YE PROPERTY ADD KAR DI HAI ---
-        inputType: 'voice', // Default 'voice' rakha hai
+        inputType: 'voice', // voice | text
+        aiPersona: 'JARVIS', // JARVIS | FRIDAY | ULTRON
+        isProtocolRedActive: false, // Emergency HUD override state
+        isDeviceLocked: false, // Guardian lock simulation state
         lastCommand: null,
         sessionStart: Date.now()
     },
@@ -1496,7 +1514,8 @@ const userState = {
             sfxClick: document.getElementById('sfx-click'),
             sfxAuthSuccess: document.getElementById('sfx-auth-success'),
             sfxAuthFail: document.getElementById('sfx-auth-fail'),
-            sfxVoiceActive: document.getElementById('sfx-voice-active')
+            sfxVoiceActive: document.getElementById('sfx-voice-active'),
+            sfxAlert: document.getElementById('sfx-alert')
         };
 
         /* 
@@ -1592,14 +1611,20 @@ const userState = {
         }
 
         let terminalInitialized = false;
-        function appendTerminalLog(message, delay = 0) {
+        function appendTerminalLog(message, delay = 0, level = 'INFO') {
             if (!dom.terminalLog) return;
             setTimeout(() => {
                 const line = document.createElement('div');
                 line.className = 'terminal-log-line';
-                line.textContent = `> ${message}`;
+                const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                line.textContent = `[${ts}] [${level}] ${message}`;
                 dom.terminalLog.appendChild(line);
+                dom.terminalLog.scrollTop = dom.terminalLog.scrollHeight;
             }, delay);
+        }
+
+        function logSystemActivity(channel, message, level = 'INFO') {
+            appendTerminalLog(`${channel}: ${message}`, 0, level);
         }
 
         function initTerminalLogs() {
@@ -1612,7 +1637,29 @@ const userState = {
                 'Secure uplink established.',
                 'All modules online.'
             ];
-            bootLines.forEach((line, idx) => appendTerminalLog(line, idx * TERMINAL_LINE_DELAY_MS));
+            bootLines.forEach((line, idx) => appendTerminalLog(line, idx * TERMINAL_LINE_DELAY_MS, 'BOOT'));
+        }
+
+        function getPersonaByInputMode(mode = userState.runtime.inputType) {
+            return mode === 'voice' ? 'JARVIS' : 'FRIDAY';
+        }
+
+        function setInputMode(mode) {
+            const nextMode = mode === 'text' ? 'text' : 'voice';
+            userState.runtime.inputType = nextMode;
+            if (!userState.runtime.isProtocolRedActive) {
+                userState.runtime.aiPersona = getPersonaByInputMode(nextMode);
+            }
+            logSystemActivity('VOICE', `Input mode switched to ${nextMode.toUpperCase()}`);
+        }
+
+        function openNeuralChatInterface() {
+            navigateTo('commands');
+            setInputMode('text');
+            logSystemActivity('COMMAND', 'Neural chat interface linked with dashboard');
+            if (dom.jarvisChatInput) {
+                dom.jarvisChatInput.focus();
+            }
         }
 
         function sendJarvisChat() {
@@ -1620,6 +1667,7 @@ const userState = {
             const MAX_CHAT_INPUT_LENGTH = 180;
             const text = dom.jarvisChatInput.value.trim().slice(0, MAX_CHAT_INPUT_LENGTH);
             if (!text) return;
+            setInputMode('text');
 
             const userLine = document.createElement('div');
             userLine.className = 'text-white text-xs';
@@ -1628,9 +1676,11 @@ const userState = {
 
             const jarvisLine = document.createElement('div');
             jarvisLine.className = 'text-cyan text-xs';
-            jarvisLine.textContent = `Jarvis: Command acknowledged — ${text}`;
+            jarvisLine.textContent = `${userState.runtime.aiPersona}: Routing command to neural core...`;
             dom.jarvisChatMessages.appendChild(jarvisLine);
 
+            logSystemActivity('COMMAND', `Neural text command queued: ${text}`);
+            processCommand(text);
             dom.jarvisChatInput.value = '';
             dom.jarvisChatMessages.scrollTop = dom.jarvisChatMessages.scrollHeight;
         }
@@ -1741,14 +1791,17 @@ const userState = {
             // 1. Validation Strictness
             if (!fname || !lname || !email || !password) {
                 showToast("All fields are mandatory.", "error");
+                logSystemActivity('AUTH', 'Signup blocked - mandatory fields missing', 'WARN');
                 return;
             }
             if (password.length < 8) {
                 showToast("Password must be 8+ characters.", "error");
+                logSystemActivity('AUTH', 'Signup blocked - weak password', 'WARN');
                 return;
             }
             if (!termsAccepted) {
                 showToast("You must accept the protocols.", "error");
+                logSystemActivity('AUTH', 'Signup blocked - protocols not accepted', 'WARN');
                 return;
             }
 
@@ -1782,6 +1835,7 @@ const userState = {
                 // 5. Success Flow
                 showToast("Identity Created. Welcome, " + fname, "success");
                 playSound('sfxAuthSuccess');
+                logSystemActivity('AUTH', `Signup success for ${email}`);
                 
                 // Reset UI
                 dom.signupForm.reset();
@@ -1791,6 +1845,7 @@ const userState = {
                 console.error("Signup Error:", error);
                 showToast(error.message, "error");
                 playSound('sfxAuthFail');
+                logSystemActivity('AUTH', `Signup failed for ${email} (${error.code || 'unknown'})`, 'ERROR');
             } finally {
                 // Reset Button
                 btnText.classList.remove('hidden');
@@ -1809,6 +1864,7 @@ const userState = {
 
             if (!email || !password) {
                 showToast("Credentials missing.", "error");
+                logSystemActivity('AUTH', 'Login blocked - credentials missing', 'WARN');
                 return;
             }
 
@@ -1823,11 +1879,13 @@ const userState = {
                 
                 // Success handled by onAuthStateChanged
                 playSound('sfxAuthSuccess');
+                logSystemActivity('AUTH', `Login request accepted for ${email}`);
 
             } catch (error) {
                 console.error("Login Error:", error);
                 showToast("Access Denied: " + error.message, "error");
                 playSound('sfxAuthFail');
+                logSystemActivity('AUTH', `Login failed for ${email} (${error.code || 'unknown'})`, 'ERROR');
                 
                 // Reset Button only on failure (Success transitions away)
                 btnText.classList.remove('hidden');
@@ -1844,6 +1902,7 @@ const userState = {
                 userState.uid = user.uid;
                 
                 console.log("SYSTEM: User Authenticated", user.uid);
+                logSystemActivity('AUTH', `Session authenticated (${user.uid.slice(0, 8)}...)`);
 
                 // 1. Hide Auth Screen
                 dom.authView.classList.add('hidden');
@@ -1889,6 +1948,7 @@ setTimeout(() => {
                 dom.bootScreen.style.display = 'none';
                 dom.authView.classList.remove('hidden');
                 dom.authView.style.display = 'flex';
+                logSystemActivity('AUTH', 'Session closed, user signed out');
             }
         });
 
@@ -2019,21 +2079,24 @@ async function loadUserProfile(uid = userState.uid) {
         function toggleVoiceListening() {
             if (!recognition) {
                 showToast("Voice Module Not Supported", "error");
+                logSystemActivity('VOICE', 'Voice module unavailable in this browser', 'ERROR');
                 return;
             }
 
             if (userState.runtime.isListening) {
                 recognition.stop();
+                logSystemActivity('VOICE', 'Voice listening stopped manually');
                 return;
             }
 
             try {
-                // SET MODE: Voice (Taaki Jarvis jawab bol kar sunaye)
-                userState.runtime.inputType = 'voice'; 
+                setInputMode('voice');
                 recognition.start();
                 console.log("SYSTEM: Mic Active. Mode: VOICE");
+                logSystemActivity('VOICE', 'Microphone armed for active listening');
             } catch (e) {
                 console.error("Mic start failed:", e);
+                logSystemActivity('VOICE', `Microphone start failed (${e.message})`, 'ERROR');
             }
         }
         // Isse HTML onclick ko ye function 100% mil jayega
@@ -2061,6 +2124,7 @@ async function loadUserProfile(uid = userState.uid) {
                 }
                 
                 playSound('sfxVoiceActive');
+                logSystemActivity('VOICE', 'Speech recognition active');
             };
 
             recognition.onend = () => {
@@ -2079,13 +2143,15 @@ async function loadUserProfile(uid = userState.uid) {
                     dom.listeningRipple.style.opacity = '0';
                     dom.listeningRipple.style.animation = 'none';
                 }
+                logSystemActivity('VOICE', 'Speech recognition ended');
             };
 
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 
-                // Input Type is already set to 'voice' in toggle function
+                setInputMode('voice');
                 if(dom.outputText) dom.outputText.innerText = `"${transcript}"`;
+                logSystemActivity('VOICE', `Transcript captured: ${transcript}`);
                 
                 // Process the speech
                 processCommand(transcript);
@@ -2097,6 +2163,7 @@ async function loadUserProfile(uid = userState.uid) {
                 if(event.error === 'no-speech') {
                     showToast("No audio detected", "warning");
                 }
+                logSystemActivity('VOICE', `Recognition error: ${event.error}`, 'ERROR');
             };
         }
 /* ==========================================================================
@@ -2115,6 +2182,8 @@ function resetJarvisUI() {
 async function processCommand(rawText) {
     const cmd = rawText.toLowerCase().trim();
     if (!cmd) return;
+    userState.runtime.lastCommand = rawText;
+    logSystemActivity('COMMAND', `Executing command: ${rawText}`);
 
     // Mood & Core Animation Start
     if(typeof updateJarvisMood === 'function') updateJarvisMood('thinking');
@@ -2142,6 +2211,18 @@ async function processCommand(rawText) {
         resetJarvisUI(); return;
     }
 
+    if (cmd.includes('protocol red') || cmd.includes('combat mode') || cmd.includes('emergency mode')) {
+        activateProtocolRed('Command');
+        speakResponse("Protocol Red engaged. ULTRON defense persona online.");
+        resetJarvisUI(); return;
+    }
+
+    if (cmd.includes('protocol normal') || cmd.includes('stand down') || cmd.includes('all clear')) {
+        resetProtocolRed();
+        speakResponse("Returning to standard operations.");
+        resetJarvisUI(); return;
+    }
+
     // --- B. IDENTITY PROTOCOLS ---
     if (cmd.includes('who made you') || cmd.includes('created you')) {
         speakResponse("I was created by Akshay. He is my commander.");
@@ -2155,6 +2236,7 @@ async function processCommand(rawText) {
     } catch (e) {
         console.error("AI Error:", e);
         speakResponse("Sir, brain module connect nahi ho pa raha. Problem: " + e.message);
+        logSystemActivity('COMMAND', `AI pipeline error: ${e.message}`, 'ERROR');
     } finally {
         toggleLoader(false);
         resetJarvisUI();
@@ -2163,6 +2245,7 @@ async function processCommand(rawText) {
 
 // 3. AI ENGINE (OpenRouter Connection)
 async function askJarvisAI(query) {
+    logSystemActivity('COMMAND', `Neural API query dispatched (${query.length} chars)`);
     const snap = await firebase.database().ref('system_config/ai_core').once('value');
     const cfg = snap.val();
 
@@ -2189,13 +2272,31 @@ async function askJarvisAI(query) {
 
     const data = await response.json();
     if (data.choices && data.choices[0]) {
+        logSystemActivity('COMMAND', 'Neural response received successfully');
         return speakResponse(data.choices[0].message.content);
     } else {
+        logSystemActivity('COMMAND', 'Neural response payload invalid', 'ERROR');
         throw new Error("AI is not responding right now.");
     }
 }
 
 // 4. VOICE ENGINE (Mute/Voice Logic)
+function selectPersonaVoice(voices, persona) {
+    if (!voices || voices.length === 0) return null;
+    const voiceMatches = (voice, key) => {
+        const voiceName = (voice && voice.name ? voice.name : '').toLowerCase();
+        const voiceLang = (voice && voice.lang ? voice.lang : '').toLowerCase();
+        return voiceName.includes(key) || voiceLang.includes(key);
+    };
+    if (persona === 'ULTRON') {
+        return voices.find(v => voiceMatches(v, 'google uk english male') || voiceMatches(v, 'david') || voiceMatches(v, 'male')) || null;
+    }
+    if (persona === 'FRIDAY') {
+        return voices.find(v => voiceMatches(v, 'female') || voiceMatches(v, 'zira') || voiceMatches(v, 'samantha')) || null;
+    }
+    return voices.find(v => voiceMatches(v, 'en-gb') || voiceMatches(v, 'male') || voiceMatches(v, 'daniel')) || null;
+}
+
 async function speakResponse(text) {
     if (typeof addToChatLog === 'function') addToChatLog(text, 'jarvis');
     const isVoiceMode = (userState.runtime.inputType === 'voice');
@@ -2210,11 +2311,24 @@ async function speakResponse(text) {
     if (synth) {
         synth.cancel();
         const ut = new SpeechSynthesisUtterance(text);
-        ut.pitch = 0.8; 
-        ut.rate = 1.0;  
+        const persona = userState.runtime.aiPersona || 'JARVIS';
+        if (persona === 'ULTRON') {
+            // Deep robotic response profile
+            ut.pitch = 0.45;
+            ut.rate = 0.78;
+        } else if (persona === 'FRIDAY') {
+            // Professional assistant profile
+            ut.pitch = 1.05;
+            ut.rate = 1.0;
+        } else {
+            // Default JARVIS profile: calm British-style cadence
+            ut.pitch = 0.78;
+            ut.rate = 0.95;
+        }
         const voices = synth.getVoices();
-        const ukMale = voices.find(v => v.name.includes('UK English Male') || v.lang === 'en-GB');
-        if (ukMale) ut.voice = ukMale;
+        const selectedVoice = selectPersonaVoice(voices, persona);
+        if (selectedVoice) ut.voice = selectedVoice;
+        logSystemActivity('VOICE', `Speech synthesis by ${persona}`);
         synth.speak(ut);
     }
 }
@@ -2276,6 +2390,26 @@ async function speakResponse(text) {
        /* ==========================================================================
    25.0 - EMOTIONAL NEURAL ENGINE & VISUAL HUD FEEDBACK
    ========================================================================== */
+
+function activateProtocolRed(source = 'System') {
+    if (userState.runtime.isProtocolRedActive) return;
+    userState.runtime.isProtocolRedActive = true;
+    userState.runtime.aiPersona = 'ULTRON';
+    document.body.classList.add('protocol-red');
+    playSound('sfxAlert');
+    if (dom.outputText) dom.outputText.innerText = '[CRITICAL] THREAT DETECTED';
+    logSystemActivity('SECURITY', `[CRITICAL] THREAT DETECTED (${source})`, 'CRITICAL');
+    showToast('PROTOCOL RED ENGAGED', 'error');
+}
+
+function resetProtocolRed() {
+    userState.runtime.isProtocolRedActive = false;
+    if (!userState.runtime.isDeviceLocked) {
+        userState.runtime.aiPersona = getPersonaByInputMode();
+    }
+    document.body.classList.remove('protocol-red');
+    logSystemActivity('SECURITY', 'Protocol Red reset to standard mode');
+}
 
 function updateJarvisMood(mood) {
     const core = document.querySelector('.core-center');
@@ -2490,8 +2624,89 @@ function updateJarvisMood(mood) {
         }
 
         // 26.5 - Device Lock Simulation
+        let guardianMotionActive = false;
+        let guardianSirenAudio = null;
+        let guardianBaseline = null;
+        let guardianAlertTriggered = false;
+        const GUARDIAN_MOTION_THRESHOLD = 5;
+
+        function triggerGuardianAlert() {
+            if (guardianAlertTriggered) return;
+            guardianAlertTriggered = true;
+            activateProtocolRed('Guardian Motion Sensor');
+            if (!guardianSirenAudio) guardianSirenAudio = dom.sfxAlert || new Audio('https://assets.mixkit.co/active_storage/sfx/222/222-preview.mp3');
+            guardianSirenAudio.loop = true;
+            guardianSirenAudio.currentTime = 0;
+            guardianSirenAudio.play().catch(() => {});
+            const warning = document.createElement('div');
+            warning.id = 'guardian-warning';
+            warning.className = 'fixed inset-0 z-[11000] flex-center bg-black/80';
+            warning.innerHTML = `<div class="border border-red-500 bg-black/95 p-6 rounded-xl text-center shadow-[0_0_40px_rgba(255,0,60,0.5)]"><div class="text-red-500 font-hud text-xl tracking-[2px] mb-2">GUARDIAN PROTOCOL</div><div class="text-white text-sm tracking-[1px]">UNAUTHORIZED DEVICE MOTION DETECTED</div></div>`;
+            document.body.appendChild(warning);
+            logSystemActivity('SECURITY', 'Guardian protocol triggered by device motion', 'CRITICAL');
+        }
+
+        function stopGuardianProtocol() {
+            guardianMotionActive = false;
+            guardianBaseline = null;
+            guardianAlertTriggered = false;
+            userState.runtime.isDeviceLocked = false;
+            window.removeEventListener('devicemotion', handleGuardianMotion);
+            const warning = document.getElementById('guardian-warning');
+            if (warning) warning.remove();
+            if (guardianSirenAudio) {
+                guardianSirenAudio.pause();
+                guardianSirenAudio.currentTime = 0;
+            }
+            resetProtocolRed();
+            logSystemActivity('SECURITY', 'Guardian protocol disarmed');
+        }
+
+        function handleGuardianMotion(event) {
+            if (!guardianMotionActive || !userState.runtime.isDeviceLocked || !event.accelerationIncludingGravity) return;
+            const { x = 0, y = 0, z = 0 } = event.accelerationIncludingGravity;
+            const intensity = Math.sqrt((x * x) + (y * y) + (z * z));
+            if (guardianBaseline === null) {
+                guardianBaseline = intensity;
+                return;
+            }
+            const deviation = Math.abs(intensity - guardianBaseline);
+            if (deviation > GUARDIAN_MOTION_THRESHOLD) {
+                triggerGuardianAlert();
+            }
+            guardianBaseline = intensity;
+        }
+
+        async function armGuardianProtocol() {
+            if (!window.DeviceMotionEvent) {
+                logSystemActivity('SECURITY', 'Device Motion API unavailable', 'WARN');
+                return;
+            }
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission !== 'granted') {
+                        logSystemActivity('SECURITY', 'Motion permission denied', 'WARN');
+                        return;
+                    }
+                } catch (error) {
+                    logSystemActivity('SECURITY', `Motion permission error: ${error.message}`, 'ERROR');
+                    return;
+                }
+            }
+            guardianMotionActive = true;
+            guardianBaseline = null;
+            // Remove stale listener before arming to guarantee a single active binding.
+            window.removeEventListener('devicemotion', handleGuardianMotion);
+            window.addEventListener('devicemotion', handleGuardianMotion);
+            logSystemActivity('SECURITY', 'Guardian protocol armed');
+        }
+
         function lockDeviceSimulation() {
             speakResponse("Locking device securely.");
+            userState.runtime.isDeviceLocked = true;
+            armGuardianProtocol();
+            logSystemActivity('SECURITY', 'Device lock engaged');
             
             const blackScreen = document.createElement('div');
             blackScreen.className = "fixed inset-0 bg-black z-[9999] cursor-none";
@@ -2501,6 +2716,7 @@ function updateJarvisMood(mood) {
             blackScreen.ondblclick = function() {
                 this.remove();
                 speakResponse("Welcome back, Sir.");
+                stopGuardianProtocol();
             };
             
             document.body.appendChild(blackScreen);
@@ -2617,11 +2833,7 @@ function sendManualCommand() {
     const text = input.value.trim();
     
     if(text) {
-        // === YAHAN NAYA LOGIC ADD KIYA HAI ===
-        // System ko batayega ki command text (likh kar) aayi hai
-        userState.runtime.inputType = 'text'; 
-        // =====================================
-
+        setInputMode('text');
         addToChatLog(text, 'user'); 
         processCommand(text); // AI isko process karega
         input.value = ''; // Text box khali karo
@@ -3042,40 +3254,53 @@ function toggleWakeWord() {
         btn.style.borderColor = "#00f3ff";
         btn.innerHTML = '<i class="fas fa-circle" id="wake-icon" style="margin-right: 10px; font-size: 9px; color: #00f3ff; text-shadow: 0 0 10px #00f3ff;"></i> Wake Word: Active';
         showToast("System monitoring for 'Jarvis' command...", "success");
+        logSystemActivity('VOICE', 'Wake word mode enabled');
     } else {
         stopPassive();
         wakeWordActive = false;
         btn.style.boxShadow = "none";
         btn.style.borderColor = "rgba(0, 243, 255, 0.3)";
         btn.innerHTML = '<i class="fas fa-circle" id="wake-icon" style="margin-right: 10px; font-size: 9px; color: #555;"></i> Wake Word: Off';
+        logSystemActivity('VOICE', 'Wake word mode disabled');
     }
 }
 
 function startPassive() {
-    if (!window.webkitSpeechRecognition) return;
-    passiveRec = new webkitSpeechRecognition();
+    if (!SpeechRecognition) {
+        logSystemActivity('VOICE', 'Wake-word passive listener unsupported', 'WARN');
+        return;
+    }
+    passiveRec = new SpeechRecognition();
     passiveRec.continuous = true;
     passiveRec.lang = 'en-US';
+    passiveRec.interimResults = false;
     
     passiveRec.onresult = (e) => {
         const text = e.results[e.results.length - 1][0].transcript.toLowerCase();
         console.log("HUD Passive Listening: " + text);
+        logSystemActivity('VOICE', `Wake-word buffer: ${text}`);
         
-        // Agar 'Jarvis' suna de toh toggleVoiceListening call hoga
         if (text.includes("jarvis") || text.includes("hey jarvis")) {
             stopPassive(); // Stop passive listening temporarily
             if (typeof playSound === 'function') playSound('sfxVoiceActive');
-            
-            // Trigger main voice listening
+            setInputMode('voice');
+            logSystemActivity('VOICE', 'Wake word detected: JARVIS');
             toggleVoiceListening(); 
         }
     };
 
     passiveRec.onend = () => {
-        if (wakeWordActive) passiveRec.start(); // Auto-restart agar manually off nahi kiya
+        if (wakeWordActive) {
+            passiveRec.start();
+        }
+    };
+
+    passiveRec.onerror = (event) => {
+        logSystemActivity('VOICE', `Wake-word listener error: ${event.error}`, 'WARN');
     };
 
     passiveRec.start();
+    logSystemActivity('VOICE', 'Wake-word passive listener armed');
 }
 
 function stopPassive() {
@@ -3083,6 +3308,7 @@ function stopPassive() {
         passiveRec.onend = null;
         passiveRec.stop();
     }
+    logSystemActivity('VOICE', 'Wake-word passive listener disarmed');
 }
 
 
